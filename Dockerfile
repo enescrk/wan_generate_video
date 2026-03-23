@@ -53,19 +53,19 @@ RUN cd /ComfyUI/custom_nodes && \
     cd ComfyUI-AdaptiveWindowSize/ComfyUI-AdaptiveWindowSize && \
     mv * ../
 
-# --- YENİ EKLENEN KISIM: hf_transfer ile hızlı indirme ---
+# --- YENİ EKLENEN KISIM: hf_transfer ile CLI olmadan doğrudan Python üzerinden indirme ---
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
-RUN huggingface-cli download Kijai/WanVideo_comfy_fp8_scaled I2V/Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors --local-dir /ComfyUI/models/diffusion_models --local-dir-use-symlinks False
-RUN huggingface-cli download Kijai/WanVideo_comfy_fp8_scaled I2V/Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors --local-dir /ComfyUI/models/diffusion_models --local-dir-use-symlinks False
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='Kijai/WanVideo_comfy_fp8_scaled', filename='I2V/Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors', local_dir='/ComfyUI/models/diffusion_models', local_dir_use_symlinks=False)"
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='Kijai/WanVideo_comfy_fp8_scaled', filename='I2V/Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors', local_dir='/ComfyUI/models/diffusion_models', local_dir_use_symlinks=False)"
 
-RUN huggingface-cli download lightx2v/Wan2.2-Lightning Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors --local-dir /ComfyUI/models/loras --local-dir-use-symlinks False
-RUN huggingface-cli download lightx2v/Wan2.2-Lightning Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors --local-dir /ComfyUI/models/loras --local-dir-use-symlinks False
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='lightx2v/Wan2.2-Lightning', filename='Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors', local_dir='/ComfyUI/models/loras', local_dir_use_symlinks=False)"
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='lightx2v/Wan2.2-Lightning', filename='Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors', local_dir='/ComfyUI/models/loras', local_dir_use_symlinks=False)"
 
-RUN huggingface-cli download Comfy-Org/Wan_2.1_ComfyUI_repackaged split_files/clip_vision/clip_vision_h.safetensors --local-dir /ComfyUI/models/clip_vision --local-dir-use-symlinks False
-RUN huggingface-cli download Kijai/WanVideo_comfy umt5-xxl-enc-bf16.safetensors --local-dir /ComfyUI/models/text_encoders --local-dir-use-symlinks False
-RUN huggingface-cli download Kijai/WanVideo_comfy Wan2_1_VAE_bf16.safetensors --local-dir /ComfyUI/models/vae --local-dir-use-symlinks False
-# -----------------------------------------------------------
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='Comfy-Org/Wan_2.1_ComfyUI_repackaged', filename='split_files/clip_vision/clip_vision_h.safetensors', local_dir='/ComfyUI/models/clip_vision', local_dir_use_symlinks=False)"
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='Kijai/WanVideo_comfy', filename='umt5-xxl-enc-bf16.safetensors', local_dir='/ComfyUI/models/text_encoders', local_dir_use_symlinks=False)"
+RUN python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='Kijai/WanVideo_comfy', filename='Wan2_1_VAE_bf16.safetensors', local_dir='/ComfyUI/models/vae', local_dir_use_symlinks=False)"
+# ------------------------------------------------------------------------------------------
 
 COPY . .
 COPY extra_model_paths.yaml /ComfyUI/extra_model_paths.yaml
