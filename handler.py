@@ -1,5 +1,4 @@
 import runpod
-from runpod.serverless.utils import rp_upload
 import os
 import websocket
 import base64
@@ -33,7 +32,6 @@ def to_nearest_multiple_of_16(value):
 def process_input(input_data, temp_dir, output_filename, input_type):
     input_dir = "/ComfyUI/input"
     os.makedirs(input_dir, exist_ok=True)
-    
     unique_filename = f"{temp_dir}_{output_filename}"
     file_path = os.path.join(input_dir, unique_filename)
     
@@ -54,26 +52,18 @@ def process_input(input_data, temp_dir, output_filename, input_type):
     else:
         raise Exception(f"지원하지 않는 입력 타입: {input_type}")
 
-        
 def download_file_from_url(url, output_path):
     try:
         result = subprocess.run([
             'wget', '-O', output_path, '--no-verbose', url
         ], capture_output=True, text=True)
-        
         if result.returncode == 0:
-            logger.info(f"✅ URL에서 파일을 성공적으로 다운로드했습니다: {url} -> {output_path}")
+            logger.info(f"✅ URL 다운로드 성공: {output_path}")
             return output_path
         else:
-            logger.error(f"❌ wget 다운로드 실패: {result.stderr}")
             raise Exception(f"URL 다운로드 실패: {result.stderr}")
-    except subprocess.TimeoutExpired:
-        logger.error("❌ 다운로드 시간 초과")
-        raise Exception("다운로드 시간 초과")
     except Exception as e:
-        logger.error(f"❌ 다운로드 중 오류 발생: {e}")
         raise Exception(f"다운로드 중 오류 발생: {e}")
-
 
 def save_base64_to_file(base64_data, temp_dir, output_filename):
     try:
@@ -82,16 +72,12 @@ def save_base64_to_file(base64_data, temp_dir, output_filename):
         file_path = os.path.abspath(os.path.join(temp_dir, output_filename))
         with open(file_path, 'wb') as f:
             f.write(decoded_data)
-        
-        logger.info(f"✅ Base64 입력을 '{file_path}' 파일로 저장했습니다.")
         return file_path
-    except (binascii.Error, ValueError) as e:
-        logger.error(f"❌ Base64 디코딩 실패: {e}")
+    except Exception as e:
         raise Exception(f"Base64 디코딩 실패: {e}")
     
 def queue_prompt(prompt):
     url = f"http://{server_address}:8188/prompt"
-    logger.info(f"Queueing prompt to: {url}")
     p = {"prompt": prompt, "client_id": client_id}
     data = json.dumps(p).encode('utf-8')
     req = urllib.request.Request(url, data=data)
@@ -100,14 +86,7 @@ def queue_prompt(prompt):
     except urllib.error.HTTPError as e:
         error_msg = e.read().decode('utf-8')
         logger.error(f"❌ ComfyUI API 에러 ({e.code}): {error_msg}")
-        raise Exception(f"ComfyUI API Error {e.code}: {error_msg}")
-
-def get_image(filename, subfolder, folder_type):
-    url = f"http://{server_address}:8188/view"
-    data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
-    url_values = urllib.parse.urlencode(data)
-    with urllib.request.urlopen(f"{url}?{url_values}") as response:
-        return response.read()
+        raise Exception(f"ComfyUI API Error 400: {error_msg}")
 
 def get_history(prompt_id):
     url = f"http://{server_address}:8188/history/{prompt_id}"
@@ -147,7 +126,6 @@ def get_videos(ws, prompt):
                     logger.warning(f"⚠️ Video silinemedi: {e}")
                     
         output_videos[node_id] = videos_output
-
     return output_videos
 
 def load_workflow(workflow_path):
@@ -192,14 +170,16 @@ def handler(job):
     length = job_input.get("length", 81)
     steps = job_input.get("steps", 10)
 
-    # --- ComfyUI Hatalarını Önlemek İçin Model Klasör Yollarını Düzeltme ---
-    if "122" in prompt:
-        prompt["122"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
-    if "549" in prompt:
-        prompt["549"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors"
-    if "173" in prompt:
-        prompt["173"]["inputs"]["clip_name"] = "split_files/clip_vision/clip_vision_h.safetensors"
-    # ------------------------------------------------------------------------
+    # --- Base Model Yollarını Düzeltme ---
+    if "122" in prompt: prompt["122"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+    if "549" in prompt: prompt["549"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+    if "173" in prompt: prompt["173"]["inputs"]["clip_name"] = "split_files/clip_vision/clip_vision_h.safetensors"
+    
+    # --- JSON'daki Hatalı Varsayılan LoRA Değerlerini Temizleme ---
+    for node in ["279", "553"]:
+        if node in prompt:
+            for i in range(5):
+                prompt[node]["inputs"][f"lora_{i}"] = "none"
 
     prompt["244"]["inputs"]["image"] = image_path
     prompt["541"]["inputs"]["num_frames"] = length
@@ -220,8 +200,7 @@ def handler(job):
 
     if "834" in prompt:
         prompt["834"]["inputs"]["steps"] = steps
-        lowsteps = int(steps*0.6)
-        prompt["829"]["inputs"]["step"] = lowsteps
+        prompt["829"]["inputs"]["step"] = int(steps * 0.6)
 
     if end_image_path_local:
         prompt["617"]["inputs"]["image"] = end_image_path_local
@@ -236,42 +215,37 @@ def handler(job):
                 lora_high_weight = lora_pair.get("high_weight", 1.0)
                 lora_low_weight = lora_pair.get("low_weight", 1.0)
                 
-                # LoRA yollarını alt klasörleriyle düzeltme
+                # Hata Çözümü: lora_{i+1} yerine lora_{i} kullanıldı (lora_0'dan başlar)
                 if lora_high:
                     if not lora_high.startswith("Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/"):
                         lora_high = f"Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/{lora_high}"
-                    prompt[high_lora_node_id]["inputs"][f"lora_{i+1}"] = lora_high
-                    prompt[high_lora_node_id]["inputs"][f"strength_{i+1}"] = lora_high_weight
+                    prompt[high_lora_node_id]["inputs"][f"lora_{i}"] = lora_high
+                    prompt[high_lora_node_id]["inputs"][f"strength_{i}"] = lora_high_weight
                     
                 if lora_low:
                     if not lora_low.startswith("Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/"):
                         lora_low = f"Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/{lora_low}"
-                    prompt[low_lora_node_id]["inputs"][f"lora_{i+1}"] = lora_low
-                    prompt[low_lora_node_id]["inputs"][f"strength_{i+1}"] = lora_low_weight
+                    prompt[low_lora_node_id]["inputs"][f"lora_{i}"] = lora_low
+                    prompt[low_lora_node_id]["inputs"][f"strength_{i}"] = lora_low_weight
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
-    
     http_url = f"http://{server_address}:8188/"
-    max_http_attempts = 180
-    for http_attempt in range(max_http_attempts):
+    
+    for http_attempt in range(180):
         try:
-            import urllib.request
-            response = urllib.request.urlopen(http_url, timeout=5)
+            urllib.request.urlopen(http_url, timeout=5)
             break
-        except Exception as e:
-            if http_attempt == max_http_attempts - 1:
-                raise Exception("ComfyUI 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.")
+        except Exception:
+            if http_attempt == 179: raise Exception("ComfyUI 서버 연결 실패")
             time.sleep(1)
     
     ws = websocket.WebSocket()
-    max_attempts = int(180/5)
-    for attempt in range(max_attempts):
+    for attempt in range(36):
         try:
             ws.connect(ws_url)
             break
-        except Exception as e:
-            if attempt == max_attempts - 1:
-                raise Exception("웹소켓 연결 시간 초과 (3분)")
+        except Exception:
+            if attempt == 35: raise Exception("웹소켓 연결 시간 초과")
             time.sleep(5)
             
     videos = get_videos(ws, prompt)
@@ -283,11 +257,9 @@ def handler(job):
         if img_name and img_name != "example_image.png":
             full_path = os.path.join(input_dir, img_name)
             try:
-                if os.path.exists(full_path):
-                    os.remove(full_path)
-                    logger.info(f"🗑️ Input resmi silindi: {full_path}")
-            except Exception as e:
-                logger.warning(f"⚠️ Input resmi silinemedi: {e}")
+                if os.path.exists(full_path): os.remove(full_path)
+            except Exception:
+                pass
 
     for node_id in videos:
         if videos[node_id]:
