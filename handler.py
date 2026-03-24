@@ -8,7 +8,7 @@ import uuid
 import logging
 import urllib.request
 import urllib.parse
-import binascii # Base64 에러 처리를 위해 import
+import binascii 
 import subprocess
 import time
 import shutil
@@ -21,7 +21,6 @@ server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
 
 def to_nearest_multiple_of_16(value):
-    """주어진 값을 가장 가까운 16의 배수로 보정, 최소 16 보장"""
     try:
         numeric_value = float(value)
     except Exception:
@@ -32,11 +31,9 @@ def to_nearest_multiple_of_16(value):
     return adjusted
 
 def process_input(input_data, temp_dir, output_filename, input_type):
-    """입력 데이터를 처리하여 ComfyUI의 input 디렉토리에 저장하고 파일명을 반환하는 함수"""
     input_dir = "/ComfyUI/input"
     os.makedirs(input_dir, exist_ok=True)
     
-    # 충돌 방지를 위해 task_id를 포함한 고유 파일명 생성
     unique_filename = f"{temp_dir}_{output_filename}"
     file_path = os.path.join(input_dir, unique_filename)
     
@@ -45,7 +42,7 @@ def process_input(input_data, temp_dir, output_filename, input_type):
         if os.path.exists(input_data):
             shutil.copy(input_data, file_path)
             return unique_filename
-        return input_data # fallback
+        return input_data 
     elif input_type == "url":
         logger.info(f"🌐 URL 입력 처리: {input_data}")
         download_file_from_url(input_data, file_path)
@@ -59,7 +56,6 @@ def process_input(input_data, temp_dir, output_filename, input_type):
 
         
 def download_file_from_url(url, output_path):
-    """URL에서 파일을 다운로드하는 함수"""
     try:
         result = subprocess.run([
             'wget', '-O', output_path, '--no-verbose', url
@@ -80,7 +76,6 @@ def download_file_from_url(url, output_path):
 
 
 def save_base64_to_file(base64_data, temp_dir, output_filename):
-    """Base64 데이터를 파일로 저장하는 함수"""
     try:
         decoded_data = base64.b64decode(base64_data)
         os.makedirs(temp_dir, exist_ok=True)
@@ -103,14 +98,12 @@ def queue_prompt(prompt):
     try:
         return json.loads(urllib.request.urlopen(req).read())
     except urllib.error.HTTPError as e:
-        # ComfyUI가 400 에러를 뱉을 경우, 정확히 어떤 노드가 문제인지 로그에 출력합니다.
         error_msg = e.read().decode('utf-8')
         logger.error(f"❌ ComfyUI API 에러 ({e.code}): {error_msg}")
         raise Exception(f"ComfyUI API Error {e.code}: {error_msg}")
 
 def get_image(filename, subfolder, folder_type):
     url = f"http://{server_address}:8188/view"
-    logger.info(f"Getting image from: {url}")
     data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
     url_values = urllib.parse.urlencode(data)
     with urllib.request.urlopen(f"{url}?{url_values}") as response:
@@ -118,7 +111,6 @@ def get_image(filename, subfolder, folder_type):
 
 def get_history(prompt_id):
     url = f"http://{server_address}:8188/history/{prompt_id}"
-    logger.info(f"Getting history from: {url}")
     with urllib.request.urlopen(url) as response:
         return json.loads(response.read())
 
@@ -142,9 +134,18 @@ def get_videos(ws, prompt):
         videos_output = []
         if 'gifs' in node_output:
             for video in node_output['gifs']:
-                with open(video['fullpath'], 'rb') as f:
+                video_path = video['fullpath']
+                with open(video_path, 'rb') as f:
                     video_data = base64.b64encode(f.read()).decode('utf-8')
                 videos_output.append(video_data)
+                
+                # --- TEMİZLİK: Üretilen videoyu diskten sil ---
+                try:
+                    os.remove(video_path)
+                    logger.info(f"🗑️ Üretilen video silindi: {video_path}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Video silinemedi: {e}")
+                    
         output_videos[node_id] = videos_output
 
     return output_videos
@@ -155,11 +156,9 @@ def load_workflow(workflow_path):
 
 def handler(job):
     job_input = job.get("input", {})
-
     logger.info(f"Received job input: {job_input}")
     task_id = f"task_{uuid.uuid4()}"
 
-    # 이미지 입력 처리 (image_path, image_url, image_base64 중 하나만 사용)
     image_path = None
     if "image_path" in job_input:
         image_path = process_input(job_input["image_path"], task_id, "input_image.jpg", "path")
@@ -168,15 +167,12 @@ def handler(job):
     elif "image_base64" in job_input:
         image_path = process_input(job_input["image_base64"], task_id, "input_image.jpg", "base64")
     else:
-        # 기본값 사용 (ComfyUI input 폴더로 복사)
         input_dir = "/ComfyUI/input"
         os.makedirs(input_dir, exist_ok=True)
         if os.path.exists("/example_image.png") and not os.path.exists(os.path.join(input_dir, "example_image.png")):
             shutil.copy("/example_image.png", os.path.join(input_dir, "example_image.png"))
         image_path = "example_image.png"
-        logger.info("기본 이미지 파일을 사용합니다: example_image.png")
 
-    # 엔드 이미지 입력 처리 (end_image_path, end_image_url, end_image_base64 중 하나만 사용)
     end_image_path_local = None
     if "end_image_path" in job_input:
         end_image_path_local = process_input(job_input["end_image_path"], task_id, "end_image.jpg", "path")
@@ -186,19 +182,24 @@ def handler(job):
         end_image_path_local = process_input(job_input["end_image_base64"], task_id, "end_image.jpg", "base64")
     
     lora_pairs = job_input.get("lora_pairs", [])
-    
     lora_count = min(len(lora_pairs), 4)
     if lora_count > len(lora_pairs):
-        logger.warning(f"LoRA 개수가 {len(lora_pairs)}개입니다. 최대 4개까지만 지원됩니다. 처음 4개만 사용합니다.")
         lora_pairs = lora_pairs[:4]
     
     workflow_file = "/new_Wan22_flf2v_api.json" if end_image_path_local else "/new_Wan22_api.json"
-    logger.info(f"Using {'FLF2V' if end_image_path_local else 'single'} workflow with {lora_count} LoRA pairs")
-    
     prompt = load_workflow(workflow_file)
     
     length = job_input.get("length", 81)
     steps = job_input.get("steps", 10)
+
+    # --- ComfyUI Hatalarını Önlemek İçin Model Klasör Yollarını Düzeltme ---
+    if "122" in prompt:
+        prompt["122"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
+    if "549" in prompt:
+        prompt["549"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors"
+    if "173" in prompt:
+        prompt["173"]["inputs"]["clip_name"] = "split_files/clip_vision/clip_vision_h.safetensors"
+    # ------------------------------------------------------------------------
 
     prompt["244"]["inputs"]["image"] = image_path
     prompt["541"]["inputs"]["num_frames"] = length
@@ -212,10 +213,6 @@ def handler(job):
     original_height = job_input["height"]
     adjusted_width = to_nearest_multiple_of_16(original_width)
     adjusted_height = to_nearest_multiple_of_16(original_height)
-    if adjusted_width != original_width:
-        logger.info(f"Width adjusted to nearest multiple of 16: {original_width} -> {adjusted_width}")
-    if adjusted_height != original_height:
-        logger.info(f"Height adjusted to nearest multiple of 16: {original_height} -> {adjusted_height}")
     prompt["235"]["inputs"]["value"] = adjusted_width
     prompt["236"]["inputs"]["value"] = adjusted_height
     prompt["498"]["inputs"]["context_overlap"] = job_input.get("context_overlap", 48)
@@ -223,10 +220,8 @@ def handler(job):
 
     if "834" in prompt:
         prompt["834"]["inputs"]["steps"] = steps
-        logger.info(f"Steps set to: {steps}")
         lowsteps = int(steps*0.6)
         prompt["829"]["inputs"]["step"] = lowsteps
-        logger.info(f"LowSteps set to: {lowsteps}")
 
     if end_image_path_local:
         prompt["617"]["inputs"]["image"] = end_image_path_local
@@ -240,17 +235,21 @@ def handler(job):
                 lora_low = lora_pair.get("low")
                 lora_high_weight = lora_pair.get("high_weight", 1.0)
                 lora_low_weight = lora_pair.get("low_weight", 1.0)
+                
+                # LoRA yollarını alt klasörleriyle düzeltme
                 if lora_high:
+                    if not lora_high.startswith("Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/"):
+                        lora_high = f"Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/{lora_high}"
                     prompt[high_lora_node_id]["inputs"][f"lora_{i+1}"] = lora_high
                     prompt[high_lora_node_id]["inputs"][f"strength_{i+1}"] = lora_high_weight
-                    logger.info(f"LoRA {i+1} HIGH applied to node 279: {lora_high} with weight {lora_high_weight}")
+                    
                 if lora_low:
+                    if not lora_low.startswith("Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/"):
+                        lora_low = f"Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/{lora_low}"
                     prompt[low_lora_node_id]["inputs"][f"lora_{i+1}"] = lora_low
                     prompt[low_lora_node_id]["inputs"][f"strength_{i+1}"] = lora_low_weight
-                    logger.info(f"LoRA {i+1} LOW applied to node 553: {lora_low} with weight {lora_low_weight}")
 
     ws_url = f"ws://{server_address}:8188/ws?clientId={client_id}"
-    logger.info(f"Connecting to WebSocket: {ws_url}")
     
     http_url = f"http://{server_address}:8188/"
     max_http_attempts = 180
@@ -258,7 +257,6 @@ def handler(job):
         try:
             import urllib.request
             response = urllib.request.urlopen(http_url, timeout=5)
-            logger.info(f"HTTP 연결 성공 (시도 {http_attempt+1})")
             break
         except Exception as e:
             if http_attempt == max_http_attempts - 1:
@@ -270,7 +268,6 @@ def handler(job):
     for attempt in range(max_attempts):
         try:
             ws.connect(ws_url)
-            logger.info(f"웹소켓 연결 성공 (시도 {attempt+1})")
             break
         except Exception as e:
             if attempt == max_attempts - 1:
@@ -280,10 +277,22 @@ def handler(job):
     videos = get_videos(ws, prompt)
     ws.close()
 
+    # --- TEMİZLİK: Kullanılan input resimlerini sil ---
+    input_dir = "/ComfyUI/input"
+    for img_name in [image_path, end_image_path_local]:
+        if img_name and img_name != "example_image.png":
+            full_path = os.path.join(input_dir, img_name)
+            try:
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                    logger.info(f"🗑️ Input resmi silindi: {full_path}")
+            except Exception as e:
+                logger.warning(f"⚠️ Input resmi silinemedi: {e}")
+
     for node_id in videos:
         if videos[node_id]:
             return {"video": videos[node_id][0]}
     
-    return {"error": "비디오를를 찾을 수 없습니다."}
+    return {"error": "비디오를 찾을 수 없습니다."}
 
 runpod.serverless.start({"handler": handler})
