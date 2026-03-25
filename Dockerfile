@@ -1,7 +1,9 @@
-# Temel imajınız
-FROM wlsdml1114/engui_genai-base_blackwell:1.1 AS runtime
+FROM wlsdml1114/engui_genai-base_blackwell:1.1 as runtime
 
-RUN pip install runpod websocket-client
+RUN pip install -U "huggingface_hub[hf_transfer]"
+# Supabase kütüphanesi eklendi
+RUN pip install runpod websocket-client supabase
+RUN pip install sageattention
 
 WORKDIR /
 

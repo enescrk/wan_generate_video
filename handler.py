@@ -11,6 +11,7 @@ import binascii
 import subprocess
 import time
 import shutil
+from supabase import create_client, Client
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +19,19 @@ logger = logging.getLogger(__name__)
 
 server_address = os.getenv('SERVER_ADDRESS', '127.0.0.1')
 client_id = str(uuid.uuid4())
+
+# --- Supabase Ayarları ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "videos")
+
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    logger.info("✅ Supabase istemcisi başarıyla başlatıldı.")
+else:
+    supabase = None
+    logger.warning("⚠️ Supabase URL veya KEY bulunamadı. Base64 formatına geri dönülecek.")
+# -------------------------
 
 def to_nearest_multiple_of_16(value):
     try:
@@ -36,17 +50,14 @@ def process_input(input_data, temp_dir, output_filename, input_type):
     file_path = os.path.join(input_dir, unique_filename)
     
     if input_type == "path":
-        logger.info(f"📁 경로 입력 처리: {input_data}")
         if os.path.exists(input_data):
             shutil.copy(input_data, file_path)
             return unique_filename
         return input_data 
     elif input_type == "url":
-        logger.info(f"🌐 URL 입력 처리: {input_data}")
         download_file_from_url(input_data, file_path)
         return unique_filename
     elif input_type == "base64":
-        logger.info(f"🔢 Base64 입력 처리")
         save_base64_to_file(input_data, input_dir, unique_filename)
         return unique_filename
     else:
@@ -54,11 +65,8 @@ def process_input(input_data, temp_dir, output_filename, input_type):
 
 def download_file_from_url(url, output_path):
     try:
-        result = subprocess.run([
-            'wget', '-O', output_path, '--no-verbose', url
-        ], capture_output=True, text=True)
+        result = subprocess.run(['wget', '-O', output_path, '--no-verbose', url], capture_output=True, text=True)
         if result.returncode == 0:
-            logger.info(f"✅ URL 다운로드 성공: {output_path}")
             return output_path
         else:
             raise Exception(f"URL 다운로드 실패: {result.stderr}")
@@ -114,14 +122,36 @@ def get_videos(ws, prompt):
         if 'gifs' in node_output:
             for video in node_output['gifs']:
                 video_path = video['fullpath']
-                with open(video_path, 'rb') as f:
-                    video_data = base64.b64encode(f.read()).decode('utf-8')
-                videos_output.append(video_data)
                 
-                # --- TEMİZLİK: Üretilen videoyu diskten sil ---
+                # --- SUPABASE YÜKLEME İŞLEMİ ---
+                if supabase:
+                    file_name = f"wan_video_{uuid.uuid4().hex[:8]}.mp4"
+                    try:
+                        # Videoyu Supabase'e yükle
+                        with open(video_path, 'rb') as f:
+                            supabase.storage.from_(SUPABASE_BUCKET).upload(
+                                path=file_name,
+                                file=f.read(),
+                                file_options={"content-type": "video/mp4"}
+                            )
+                        # Public URL'sini al ve listeye ekle
+                        video_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(file_name)
+                        videos_output.append(video_url)
+                        logger.info(f"✅ Video başarıyla Supabase'e yüklendi: {video_url}")
+                    except Exception as e:
+                        logger.error(f"❌ Supabase yükleme hatası: {e}. Base64 formatına geri dönülüyor.")
+                        # Supabase'e yüklenemezse sistem çökmesin diye Base64'e dön
+                        with open(video_path, 'rb') as f:
+                            videos_output.append(base64.b64encode(f.read()).decode('utf-8'))
+                else:
+                    # Supabase ayarları girilmediyse Base64 kullan
+                    with open(video_path, 'rb') as f:
+                        videos_output.append(base64.b64encode(f.read()).decode('utf-8'))
+                
+                # --- TEMİZLİK: Üretilen videoyu RunPod diskinden sil ---
                 try:
                     os.remove(video_path)
-                    logger.info(f"🗑️ Üretilen video silindi: {video_path}")
+                    logger.info(f"🗑️ Geçici video RunPod'dan silindi: {video_path}")
                 except Exception as e:
                     logger.warning(f"⚠️ Video silinemedi: {e}")
                     
@@ -170,12 +200,10 @@ def handler(job):
     length = job_input.get("length", 81)
     steps = job_input.get("steps", 10)
 
-    # --- Base Model Yollarını Düzeltme ---
     if "122" in prompt: prompt["122"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-HIGH_fp8_e4m3fn_scaled_KJ.safetensors"
     if "549" in prompt: prompt["549"]["inputs"]["model"] = "I2V/Wan2_2-I2V-A14B-LOW_fp8_e4m3fn_scaled_KJ.safetensors"
     if "173" in prompt: prompt["173"]["inputs"]["clip_name"] = "split_files/clip_vision/clip_vision_h.safetensors"
     
-    # --- JSON'daki Hatalı Varsayılan LoRA Değerlerini Temizleme ---
     for node in ["279", "553"]:
         if node in prompt:
             for i in range(5):
@@ -215,7 +243,6 @@ def handler(job):
                 lora_high_weight = lora_pair.get("high_weight", 1.0)
                 lora_low_weight = lora_pair.get("low_weight", 1.0)
                 
-                # Hata Çözümü: lora_{i+1} yerine lora_{i} kullanıldı (lora_0'dan başlar)
                 if lora_high:
                     if not lora_high.startswith("Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/"):
                         lora_high = f"Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/{lora_high}"
@@ -240,6 +267,7 @@ def handler(job):
             time.sleep(1)
     
     ws = websocket.WebSocket()
+    ws.settimeout(600)
     for attempt in range(36):
         try:
             ws.connect(ws_url)
@@ -251,7 +279,6 @@ def handler(job):
     videos = get_videos(ws, prompt)
     ws.close()
 
-    # --- TEMİZLİK: Kullanılan input resimlerini sil ---
     input_dir = "/ComfyUI/input"
     for img_name in [image_path, end_image_path_local]:
         if img_name and img_name != "example_image.png":
@@ -263,6 +290,7 @@ def handler(job):
 
     for node_id in videos:
         if videos[node_id]:
+            # Dönüş verisi artık doğrudan URL (veya hata olduysa Base64) olarak aktarılacak
             return {"video": videos[node_id][0]}
     
     return {"error": "비디오를 찾을 수 없습니다."}
