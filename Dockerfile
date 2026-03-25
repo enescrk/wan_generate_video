@@ -56,3 +56,4 @@ COPY extra_model_paths.yaml /ComfyUI/extra_model_paths.yaml
 RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]
+
